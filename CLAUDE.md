@@ -20,6 +20,7 @@ Everything else serves that one command.
 - A design point is never recomputed: `evaluate` reads `result.json` if it exists.
 - Use common random seeds across design points so differences are not noise.
 - The tagger is retrained for every design point. Do not reuse a tagger across designs.
+  Until that exists, the stock FCC model is a stand-in (`DETOPT_TAGGER=stock`); results say so.
 - Do not change the pinned Key4hep release without saying so.
 
 ## Build order

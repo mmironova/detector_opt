@@ -107,7 +107,7 @@ def _run_job(job: Job, card_text: str, sim_dir: Path) -> Path:
         + f"set MaxEvents {job.events}\nset RandomSeed {job.delphes_seed}\n"
     )
     with open(p["log"], "w") as log:
-        if job.source == "stdhep":
+        if job.input.endswith(".stdhep.gz"):  # older caches; inputs are ROOT chunks now
             unzip = subprocess.Popen(["pigz", "-dc", job.input], stdout=subprocess.PIPE,
                                      stderr=subprocess.DEVNULL)
             result = subprocess.run(

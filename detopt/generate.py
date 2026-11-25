@@ -6,8 +6,18 @@ Runs inside the Key4hep container (needs xrdcp, Delphes and ROOT). Writes to
 $DETOPT_GEN (default $SCRATCH/detopt-gen):
 
     $DETOPT_GEN/<sample>/manifest.json
-    $DETOPT_GEN/<sample>/files/events_*.stdhep.gz   (source "stdhep")
+    $DETOPT_GEN/<sample>/files/events_*.stdhep.gz   (source "stdhep": the official files)
+    $DETOPT_GEN/<sample>/chunks/*_NNN.root          (source "stdhep": the same events, converted)
     $DETOPT_GEN/<sample>/chunk_NNN.root             (source "pythia8")
+
+Every input simulate() reads is a Delphes generator-level ROOT file (Particle
+branch) of at most STDHEP_CHUNK_EVENTS events, read with DelphesROOT_EDM4HEP.
+The official stdhep files are converted once with Delphes (DelphesSTDHEP and
+cards/generator_only.tcl) and split, because the k4SimDelphes executables
+ignore SkipEvents: without chunks, one 100k-event file would be one long job.
+The conversion stores single-precision values; the simulated events agree with
+reading the stdhep file directly to floating-point rounding (checked: same
+particles, same tracks, relative differences ~1e-7).
 
 The manifest lists the inputs in the order simulate() consumes them, with
 their event counts and checksums (stdhep) or seeds (pythia8), and for filtered
@@ -41,6 +51,9 @@ GENERATOR_ONLY_CARD = CARDS / "generator_only.tcl"
 COUNT_CARD = CARDS / "count_events.tcl"
 OUTPUT_CONFIG = CARDS / "edm4hep_output_config.tcl"
 
+# Events per converted stdhep chunk (one Delphes job each in simulate()).
+STDHEP_CHUNK_EVENTS = 10000
+
 # Generated (not accepted) events per Pythia8 chunk.
 PYTHIA_CHUNK_EVENTS = {True: 25000, False: 10000}  # keyed by "has a filter"
 
@@ -61,7 +74,11 @@ def load_manifest(sample: Sample, root: Path | None = None) -> dict | None:
 
 
 def available_events(manifest: dict | None) -> int:
-    return sum(i["events"] for i in manifest["inputs"]) if manifest else 0
+    if not manifest:
+        return 0
+    if manifest["source"] == "stdhep":
+        return sum(i["events"] for i in manifest.get("inputs", []) if i["file"].endswith(".root"))
+    return sum(i["events"] for i in manifest["inputs"])
 
 
 def _new_manifest(sample: Sample) -> dict:
@@ -122,7 +139,7 @@ def count_stdhep_events(path: Path, workdir: Path) -> int:
 
 def root_entries(path: Path, tree: str) -> int:
     """Entries of a ROOT tree, read in a separate process (safe from threads)."""
-    return _rootutil.run("entries", path, tree)
+    return int(_rootutil.run("entries", path, tree))
 
 
 def _eos_files(sample: Sample) -> list[str]:
@@ -147,11 +164,48 @@ def _adler32_local(path: Path) -> str:
     ).stdout.split()[0]
 
 
+def _convert_and_split(sample: Sample, sdir: Path, entry: dict) -> list[dict]:
+    """Convert one downloaded stdhep file to Delphes generator-level ROOT chunks."""
+    local = sdir / entry["file"]
+    (sdir / "chunks").mkdir(exist_ok=True)
+    stem = local.name.split(".")[0]
+    full = sdir / "chunks" / f"{stem}.full.root"
+    full.unlink(missing_ok=True)
+    with open(sdir / "chunks" / f"{stem}.log", "w") as log:
+        unzip = subprocess.Popen(["pigz", "-dc", str(local)], stdout=subprocess.PIPE)
+        conv = subprocess.run(["DelphesSTDHEP", str(GENERATOR_ONLY_CARD), str(full)],
+                              stdin=unzip.stdout, stdout=log, stderr=subprocess.STDOUT)
+        unzip.stdout.close()
+        unzip.wait()
+    if conv.returncode != 0 or unzip.returncode != 0:
+        raise RuntimeError(f"converting {local} failed; see {sdir / 'chunks' / (stem + '.log')}")
+    counts = _rootutil.run("split", full, sdir / "chunks" / stem, STDHEP_CHUNK_EVENTS)
+    full.unlink()
+    if sum(counts) != entry["events"]:
+        raise RuntimeError(f"{local}: {sum(counts)} events converted, {entry['events']} counted")
+    first = 0
+    chunks = []
+    for k, n in enumerate(counts):
+        chunks.append({"file": f"chunks/{stem}_{k:03d}.root", "events": n, "source_file": entry["file"],
+                       "first_event": first, "adler32": entry["adler32"]})
+        first += n
+    return chunks
+
+
 def prepare_stdhep(sample: Sample, target: int, root: Path) -> dict:
     sdir = sample_dir(sample, root)
     (sdir / "files").mkdir(parents=True, exist_ok=True)
     manifest = load_manifest(sample, root) or _new_manifest(sample)
-    have = {i["eos_path"] for i in manifest["inputs"]}
+    # Older manifests listed the stdhep files as inputs; keep them as stdhep_files.
+    if "stdhep_files" not in manifest:
+        manifest["stdhep_files"] = [i for i in manifest["inputs"] if i["file"].endswith(".stdhep.gz")]
+        manifest["inputs"] = [i for i in manifest["inputs"] if i["file"].endswith(".root")]
+    converted = {i["source_file"] for i in manifest["inputs"]}
+    for entry in manifest["stdhep_files"]:
+        if entry["file"] not in converted:
+            manifest["inputs"] += _convert_and_split(sample, sdir, entry)
+            _write_manifest(sample, manifest, root)
+    have = {i["eos_path"] for i in manifest["stdhep_files"]}
     for eos_path in _eos_files(sample):
         if available_events(manifest) >= target:
             break
@@ -168,12 +222,14 @@ def prepare_stdhep(sample: Sample, target: int, root: Path) -> dict:
         partial.replace(local)
         with tempfile.TemporaryDirectory(dir=sdir) as tmp:
             events = count_stdhep_events(local, Path(tmp))
-        manifest["inputs"].append({
+        entry = {
             "file": str(local.relative_to(sdir)),
             "eos_path": eos_path,
             "adler32": local_sum,
             "events": events,
-        })
+        }
+        manifest["stdhep_files"].append(entry)
+        manifest["inputs"] += _convert_and_split(sample, sdir, entry)
         _write_manifest(sample, manifest, root)
         print(f"{sample.name}: {local.name} {events} events, total {available_events(manifest)}", flush=True)
     if available_events(manifest) < target:
@@ -211,7 +267,7 @@ def generate_pythia_chunk(sample: Sample, k: int, root: Path) -> dict:
     generated = root_entries(raw, "Delphes")
     out = sdir / f"chunk_{k:03d}.root"
     if sample.filter_boson is not None:
-        accepted = _rootutil.run("filter", raw, out, sample.filter_boson)
+        accepted = int(_rootutil.run("filter", raw, out, sample.filter_boson))
         raw.unlink()
     else:
         raw.replace(out)
@@ -261,7 +317,7 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 4)))
     args = parser.parse_args()
 
-    for tool in ("xrdcp", "xrdfs", "pigz", "DelphesSTDHEP_EDM4HEP", "DelphesPythia8"):
+    for tool in ("xrdcp", "xrdfs", "pigz", "DelphesSTDHEP_EDM4HEP", "DelphesSTDHEP", "DelphesPythia8"):
         if shutil.which(tool) is None:
             raise SystemExit(f"{tool} not found: run this inside the container (./run.sh ...)")
 
