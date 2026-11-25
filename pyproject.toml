@@ -1,0 +1,8 @@
+[project]
+name = "detopt"
+version = "0.0.1"
+description = "Physics-driven detector optimization: feasibility study"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

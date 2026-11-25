@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+runs/
+detopt-runs/
+*.root
+*.stdhep
+*.hepmc
+slurm-*.out
+.vscode/
