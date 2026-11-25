@@ -9,11 +9,14 @@ Everything else serves that one command.
 - Runs on NERSC Perlmutter. Key4hep does not source natively there.
 - Run anything that needs Key4hep through the container: `./run.sh <command>`.
 - `setup.sh` holds the image name, the pinned Key4hep release and the output path.
-- Pure-Python code and `tests/` run without the container.
+- Pure-Python code and `tests/` run without the container; `tests/test_simulate.py` needs it.
+- Generator-level events are made once (`detopt/generate.py`, into `$DETOPT_GEN` on scratch) and shared
+  by every design. Never regenerate them per design.
 
 ## Rules
 - Login nodes: tests and jobs of about 100 events only. Anything heavier goes through Slurm (`slurm/`).
-- Outputs go under `$DETOPT_RUNS/<design_hash>/` on scratch, never into the repo.
+- Outputs go under `$DETOPT_RUNS/<design_hash>/` (`/global/cfs/cdirs/atlas/mironova/detector_opt/outputs`), never into the repo.
+- Larger runs (Slurm) work in `$DETOPT_SCRATCH_RUNS` (`$SCRATCH/detopt-runs`) and copy `result.json`, `design.json` and `card.tcl` back to `$DETOPT_RUNS/<design_hash>/`.
 - A design point is never recomputed: `evaluate` reads `result.json` if it exists.
 - Use common random seeds across design points so differences are not noise.
 - The tagger is retrained for every design point. Do not reuse a tagger across designs.

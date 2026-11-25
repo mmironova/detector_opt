@@ -2,6 +2,9 @@
 
     python -m detopt.evaluate --inner-radius-mm 13.7 \
         --material-x0-percent 0.3 --hit-resolution-um 3
+
+Designs outside design.BOUNDS but inside design.EXTENDED_BOUNDS only run with
+--beyond-baseline; their result.json has "beyond_baseline": true.
 """
 
 from __future__ import annotations
@@ -28,8 +31,13 @@ def evaluate(
     seed: int = 1,
     template: Path = DEFAULT_TEMPLATE,
     root: Path | None = None,
+    beyond_baseline: bool = False,
 ) -> dict:
-    """Run the full chain for one design, or return the cached result."""
+    """Run the full chain for one design, or return the cached result.
+
+    A design outside design.BOUNDS is refused unless beyond_baseline is True.
+    """
+    design.check_allowed(beyond_baseline)
     run_dir = (root or runs_root()) / design.hash
     result_file = run_dir / "result.json"
 
@@ -50,6 +58,7 @@ def evaluate(
     result = {
         "design": design.to_dict(),
         "hash": design.hash,
+        "beyond_baseline": design.beyond_baseline,
         "n_events": n_events,
         "seed": seed,
         **numbers,
@@ -65,6 +74,11 @@ def main() -> None:
     parser.add_argument("--hit-resolution-um", type=float, required=True)
     parser.add_argument("--n-events", type=int, default=100)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument(
+        "--beyond-baseline",
+        action="store_true",
+        help="allow parameters outside design.BOUNDS (up to design.EXTENDED_BOUNDS)",
+    )
     args = parser.parse_args()
 
     design = Design(
@@ -72,7 +86,10 @@ def main() -> None:
         material_x0_percent=args.material_x0_percent,
         hit_resolution_um=args.hit_resolution_um,
     )
-    print(json.dumps(evaluate(design, args.n_events, args.seed), indent=2))
+    result = evaluate(
+        design, args.n_events, args.seed, beyond_baseline=args.beyond_baseline
+    )
+    print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":
