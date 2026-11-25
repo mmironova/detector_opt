@@ -72,6 +72,12 @@ SAMPLES: tuple[Sample, ...] = (
     Sample("p8_ee_Zqq_ecm240", "background", 52.6539, "pythia8",
            seed_base=10000, note="Z/gamma* -> qq, unfiltered"),
     _wzp6("wzp6_ee_nuenueZ_ecm240", 0.033274, "background", "nunu channel"),
+    # Z/gamma* -> ll (ll channel) and ZH with Z -> qq (here Z -> uu, dd only; nunu channel).
+    _wzp6("wzp6_ee_ee_Mee_30_150_ecm240", 8.305, "background", "Z/gamma* -> ee, 30 < m_ee < 150 GeV"),
+    _wzp6("wzp6_ee_mumu_ecm240", 5.288, "background", "Z/gamma* -> mumu"),
+    _wzp6("wzp6_ee_qqH_Hbb_ecm240", 0.03107, "background", "Z(uu, dd)H, H -> bb"),
+    _wzp6("wzp6_ee_qqH_Hcc_ecm240", 0.001542, "background", "Z(uu, dd)H, H -> cc"),
+    _wzp6("wzp6_ee_qqH_Hgg_ecm240", 0.004367, "background", "Z(uu, dd)H, H -> gg"),
 )
 
 BY_NAME = {s.name: s for s in SAMPLES}

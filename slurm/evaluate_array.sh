@@ -3,6 +3,9 @@
 #
 #   sbatch --array=1-10 slurm/evaluate_array.sh designs.txt
 #
+# One design on a whole debug node (30 min limit, charged as a full node):
+#   sbatch --qos=debug --time=00:30:00 --cpus-per-task=256 --array=1 slurm/evaluate_array.sh designs/baseline.txt
+#
 # designs.txt has one design per line:
 #   <inner_radius_mm> <material_x0_percent> <hit_resolution_um> [beyond-baseline]
 # The optional fourth column allows a design outside design.BOUNDS
@@ -53,8 +56,8 @@ DETOPT_RUNS="$work" ./run.sh python -m detopt.evaluate \
     --seed 1 \
     ${flags[@]+"${flags[@]}"}
 
-# Copy the summary back to CFS. Bulky files (EDM4hep, tagger, histograms) stay on scratch.
+# Copy the summary back to CFS. Bulky files (EDM4hep, ntuples, templates) stay on scratch.
 mkdir -p "$outputs/$hash"
-for f in result.json design.json card.tcl; do
-    if [ -f "$work/$hash/$f" ]; then cp "$work/$hash/$f" "$outputs/$hash/"; fi
+for f in result.json design.json card.tcl hists/fit.json hists/summary.json sim/manifest.json; do
+    if [ -f "$work/$hash/$f" ]; then cp "$work/$hash/$f" "$outputs/$hash/$(basename "$f")"; fi
 done

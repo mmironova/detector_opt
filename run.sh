@@ -10,7 +10,8 @@ if [ "$KEY4HEP_RELEASE" = "SET-ME" ]; then
     exit 1
 fi
 
-export PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}"
+# Only the repo: the host PYTHONPATH (other Python versions) must not leak into the container.
+export PYTHONPATH="$here"
 
 # Key4hep's setup.sh reports errors (e.g. an unknown release) on stdout, so keep
 # its output quiet on success but show it if sourcing fails.

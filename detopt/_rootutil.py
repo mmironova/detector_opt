@@ -6,6 +6,7 @@ Code in the main thread may call the functions directly.
 
     python -m detopt._rootutil entries FILE TREE
     python -m detopt._rootutil filter SRC DST BOSON
+    python -m detopt._rootutil split SRC DST_PREFIX CHUNK
 """
 
 from __future__ import annotations
@@ -76,8 +77,26 @@ def filter_chunk(src: str | Path, dst: str | Path, boson: int) -> int:
     return n_kept
 
 
-def run(*args: str) -> int:
-    """Call this module in a separate process; return its integer result."""
+def split(src: str | Path, dst_prefix: str | Path, chunk: int) -> list[int]:
+    """Split the Delphes tree of src into files <dst_prefix>_NNN.root of `chunk` entries."""
+    import ROOT  # noqa: PLC0415
+
+    fin = ROOT.TFile.Open(str(src))
+    tree = fin.Get("Delphes")
+    n = int(tree.GetEntries())
+    counts = []
+    for k, first in enumerate(range(0, n, chunk)):
+        take = min(chunk, n - first)
+        fout = ROOT.TFile(f"{dst_prefix}_{k:03d}.root", "RECREATE")
+        tree.CopyTree("", "", take, first).Write()
+        fout.Close()
+        counts.append(take)
+    fin.Close()
+    return counts
+
+
+def run(*args: str):
+    """Call this module in a separate process; return its JSON result."""
     result = subprocess.run(
         [sys.executable, "-m", "detopt._rootutil", *map(str, args)],
         capture_output=True, text=True, cwd=Path(__file__).resolve().parent.parent,
@@ -85,7 +104,7 @@ def run(*args: str) -> int:
     lines = [l for l in result.stdout.splitlines() if l.startswith("{")]
     if result.returncode != 0 or not lines:
         raise RuntimeError(f"_rootutil {' '.join(map(str, args))} failed:\n{result.stderr[-2000:]}")
-    return int(json.loads(lines[-1])["result"])
+    return json.loads(lines[-1])["result"]
 
 
 if __name__ == "__main__":
@@ -94,6 +113,8 @@ if __name__ == "__main__":
         value = entries(rest[0], rest[1])
     elif cmd == "filter":
         value = filter_chunk(rest[0], rest[1], int(rest[2]))
+    elif cmd == "split":
+        value = split(rest[0], rest[1], int(rest[2]))
     else:
         raise SystemExit(f"unknown command {cmd}")
     print(json.dumps({"result": value}))
